@@ -314,11 +314,15 @@ try {
 
     $SymbolPath = "srv*" + $SymbolCache + "*https://msdl.microsoft.com/download/symbols"
 
-    # Commands passed to CDB via -c
-    # Do NOT use .load here - it breaks the command chain and drops CDB to interactive prompt
-    # !analyze -v is built into CDB natively and needs no extension loading
-    # q at the end tells CDB to quit - combined with -G and -g this ensures fully non-interactive run
-    $Commands = "!analyze -v; kv; q"
+    # Build a single quoted argument string for CDB
+    # This avoids PowerShell Start-Process array splitting on spaces inside paths
+    # -G = skip initial breakpoint (no pause on load)
+    # -g = skip final breakpoint (no pause on exit)
+    # -logo = write output log overwriting any existing file
+    # -c = run these commands then q exits cleanly
+    # Do NOT use .load in -c - it splits on spaces and crashes CDB into interactive prompt
+    # !analyze -v is built into CDB natively via the ext.dll already loaded at startup
+    $CdbArgString = "-G -g -z `"$($NewestDump.FullName)`" -y `"$SymbolPath`" -logo `"$ReportPath`" -c `"!analyze -v; kv; q`""
 
     Write-Section "Running debugger"
     Write-Host "Debugger         $CdbPath"
@@ -327,42 +331,24 @@ try {
     Write-Host "Dump date        $($NewestDump.LastWriteTime)"
     Write-Host "Symbol path      $SymbolPath"
     Write-Host "Report file      $ReportPath"
+    Write-Host "CDB arguments    $CdbArgString"
 
-    # Use System.Diagnostics.ProcessStartInfo directly
-    # CreateNoWindow = true is the definitive way to suppress the console window
-    # UseShellExecute = false is required for CreateNoWindow to work
-    # -G = do not stop at initial breakpoint (no pause on startup)
-    # -g = do not stop at final breakpoint (no pause on exit)
-    # -logo = write output to log file overwriting any existing file
-    # -c = run these commands at startup then q exits cleanly
+    # Use ProcessStartInfo directly so CreateNoWindow is honored
+    # UseShellExecute must be false for CreateNoWindow to work
+    $StartInfo                  = New-Object System.Diagnostics.ProcessStartInfo
+    $StartInfo.FileName         = $CdbPath
+    $StartInfo.Arguments        = $CdbArgString
+    $StartInfo.UseShellExecute  = $false
+    $StartInfo.CreateNoWindow   = $true
+    $StartInfo.RedirectStandardInput = $false
 
-    $CdbArgs = "-G -g -z `"$($NewestDump.FullName)`" -y `"$SymbolPath`" -logo `"$ReportPath`" -c `"$Commands`""
-
-    Write-Host "Starting CDB"
-
-    $ProcInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $ProcInfo.FileName               = $CdbPath
-    $ProcInfo.Arguments              = $CdbArgs
-    $ProcInfo.UseShellExecute        = $false
-    $ProcInfo.CreateNoWindow         = $true
-    $ProcInfo.RedirectStandardOutput = $false
-    $ProcInfo.RedirectStandardError  = $false
-
-    $Proc = [System.Diagnostics.Process]::Start($ProcInfo)
-
-    if ($null -eq $Proc) {
-        throw "CDB process failed to start"
-    }
-
-    # Wait up to 5 minutes for CDB to finish
+    $Proc     = [System.Diagnostics.Process]::Start($StartInfo)
     $Finished = $Proc.WaitForExit(300000)
 
     if (-not $Finished) {
         $Proc.Kill()
         throw "CDB did not complete within the 5 minute timeout"
     }
-
-    Write-Host "CDB exited with code $($Proc.ExitCode)"
 
     if (-not (Test-Path -LiteralPath $ReportPath)) {
         throw "Debug report was not created"
@@ -372,7 +358,8 @@ try {
 
     Write-Section "Completed"
     Write-Host "Report file $ReportPath"
-} catch {
+}
+catch {
     Write-Section "Debug run failed"
     Write-Host $_.Exception.Message
     exit 1

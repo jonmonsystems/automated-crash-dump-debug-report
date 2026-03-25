@@ -151,7 +151,7 @@ function Get-ReportValue {
         [string]$Prefix
     )
 
-    $Pattern = "^\s*" + [regex]::Escape($Prefix) + "\s*:"
+    $Pattern = "^\s*" + [regex]::Escape($Prefix) + "\s*:" 
     $Match = $Lines | Where-Object { $_ -match $Pattern } | Select-Object -First 1
 
     if ($Match) {
@@ -318,6 +318,7 @@ try {
     $ExtDll      = Join-Path $DebuggerDir "winext\ext.dll"
     $SymbolPath  = "srv*" + $SymbolCache + "*https://msdl.microsoft.com/download/symbols"
 
+    # Build the CDB command string
     # Load ext.dll explicitly to bypass extension gallery download failures
     # .reload without /f avoids hanging on large dumps
     $Commands = ".load `"$ExtDll`"; .reload; !analyze -v; kv; q"
@@ -331,10 +332,10 @@ try {
 
     # Run CDB with a 5-minute timeout to prevent indefinite hangs
     $ProcArgs = @(
-        "-z", "`"$($NewestDump.FullName)`"
-        "-y", "`"$SymbolPath`"
-        "-logo", "`"$ReportPath`"
-        "-c", "`"$Commands`""
+        "-z", $NewestDump.FullName,
+        "-y", $SymbolPath,
+        "-logo", $ReportPath,
+        "-c", $Commands
     )
 
     $Proc     = Start-Process -FilePath $CdbPath -ArgumentList $ProcArgs -NoNewWindow -PassThru

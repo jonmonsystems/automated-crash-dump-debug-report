@@ -1,7 +1,7 @@
 # Analyze newest system crash dump with CDB
 # Writes full debug report to C:\OnSystems
 # Prints a short summary only
-# Designed for Syncro RMM deployment - runs as SYSTEM
+# Designed for Syncro RMM deployment - runs fully headless
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -312,15 +312,13 @@ try {
     $ReportName   = $DumpBaseName + "_debugreport_" + $TimeStamp + ".txt"
     $ReportPath   = Join-Path -Path $ReportRoot -ChildPath $ReportName
 
-    $DebuggerDir = Split-Path -Parent $CdbPath
-    $ExtDll      = Join-Path $DebuggerDir "winext\ext.dll"
-    $SymbolPath  = "srv*" + $SymbolCache + "*https://msdl.microsoft.com/download/symbols"
+    $SymbolPath = "srv*" + $SymbolCache + "*https://msdl.microsoft.com/download/symbols"
 
-    # -G skips the initial breakpoint so CDB does not pause waiting for user input
-    # -g ignores the final breakpoint on process exit
-    # -logo writes output to file (overwrite mode)
-    # -c runs commands then q exits - CDB will not prompt
-    $Commands = ".load `"$ExtDll`"; !analyze -v; kv; q"
+    # Commands passed to CDB via -c
+    # Do NOT use .load here - it breaks the command chain and drops CDB to interactive prompt
+    # !analyze -v is built into CDB natively and needs no extension loading
+    # q at the end tells CDB to quit - combined with -G and -g this ensures fully non-interactive run
+    $Commands = "!analyze -v; kv; q"
 
     Write-Section "Running debugger"
     Write-Host "Debugger         $CdbPath"
@@ -330,11 +328,14 @@ try {
     Write-Host "Symbol path      $SymbolPath"
     Write-Host "Report file      $ReportPath"
 
-    # Build the full command string for cmd /c so no new window is created
-    # -G = ignore initial breakpoint (do not pause at startup)
-    # -g = ignore final breakpoint (do not pause at exit)
-    # -logo = overwrite log file with output
-    # -c = run these commands on startup then exit via q
+    # Use System.Diagnostics.ProcessStartInfo directly
+    # CreateNoWindow = true is the definitive way to suppress the console window
+    # UseShellExecute = false is required for CreateNoWindow to work
+    # -G = do not stop at initial breakpoint (no pause on startup)
+    # -g = do not stop at final breakpoint (no pause on exit)
+    # -logo = write output to log file overwriting any existing file
+    # -c = run these commands at startup then q exits cleanly
+
     $CdbArgs = "-G -g -z `"$($NewestDump.FullName)`" -y `"$SymbolPath`" -logo `"$ReportPath`" -c `"$Commands`""
 
     Write-Host "Starting CDB"

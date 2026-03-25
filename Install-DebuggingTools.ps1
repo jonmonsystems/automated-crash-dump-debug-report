@@ -7,11 +7,13 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ===== SETTINGS =====
-# Stable FWLink from Microsoft Windows SDK downloads page - resolves to current SDK installer
-$SdkUrl         = "https://go.microsoft.com/fwlink/?linkid=2349110"
-$InstallRoot    = "C:\OnSystems\syncrodeploy\windebug"
-$SdkInstaller   = Join-Path $InstallRoot "winsdksetup.exe"
-$MinimumVersion = [version]"10.0.26100.0"
+# Latest stable Windows 11 SDK installer link from Microsoft Learn Windows SDK downloads page
+# Validated working build: 10.0.26100.7627
+$SdkUrl            = "https://go.microsoft.com/fwlink/?linkid=2347650"
+$InstallRoot       = "C:\OnSystems\syncrodeploy\windebug"
+$SdkInstaller      = Join-Path $InstallRoot "winsdksetup.exe"
+$MinimumVersion    = [version]"10.0.26100.0"       # floor - any 26100 build or higher
+$MaximumVersion    = [version]"10.0.26100.7627"    # ceiling - last validated build
 
 # ===== FUNCTIONS =====
 
@@ -42,7 +44,7 @@ function Get-DebuggerCandidates {
                 Path        = $Item.FullName
                 Name        = $Item.Name
                 VersionText = $Item.VersionInfo.FileVersion
-                Version     = try { [version]($Item.VersionInfo.FileVersion -replace ' .*', '') } catch { [version]"0.0.0.0" }
+                Version     = try { [version]($Item.VersionInfo.FileVersion -replace ' .*','') } catch { [version]"0.0.0.0" }
             }
         }
     }
@@ -55,16 +57,32 @@ function Get-HighestDebuggerVersion {
     if ($Candidates.Count -eq 0) {
         return $null
     }
+
     return $Candidates | Sort-Object Version -Descending | Select-Object -First 1
 }
 
 function Test-DebuggerVersionSufficient {
-    param([version]$MinimumRequiredVersion)
+    param(
+        [version]$MinimumRequiredVersion,
+        [version]$MaximumAllowedVersion
+    )
+
     $Highest = Get-HighestDebuggerVersion
     if ($null -eq $Highest) {
         return $false
     }
-    return ($Highest.Version -ge $MinimumRequiredVersion)
+
+    if ($Highest.Version -lt $MinimumRequiredVersion) {
+        return $false
+    }
+
+    if ($Highest.Version -gt $MaximumAllowedVersion) {
+        Write-Host "WARNING: Installed debugger version $($Highest.VersionText) exceeds maximum validated version $MaximumAllowedVersion"
+        Write-Host "This build has not been validated - verify compatibility with Analyze-CrashDump.ps1 before use"
+        return $false
+    }
+
+    return $true
 }
 
 # ===== SCRIPT START =====
@@ -83,10 +101,10 @@ try {
         Write-Host "No existing debugger files found"
     }
 
-    if (Test-DebuggerVersionSufficient -MinimumRequiredVersion $MinimumVersion) {
+    if (Test-DebuggerVersionSufficient -MinimumRequiredVersion $MinimumVersion -MaximumAllowedVersion $MaximumVersion) {
         $Highest = Get-HighestDebuggerVersion
         Write-Host "Debugger version already meets minimum requirement"
-        Write-Host "Installed version $($Highest.VersionText)"
+        Write-Host "Using installed version $($Highest.VersionText)"
         Write-Host "No install needed"
         exit 0
     }
@@ -144,7 +162,7 @@ try {
 
     $Installed = @(Get-DebuggerCandidates)
 
-    if ($Installed.Count -eq 0) {
+    if (-not $Installed -or $Installed.Count -eq 0) {
         throw "Debugger executables were not found after install"
     }
 
@@ -163,10 +181,16 @@ try {
         throw "Installed debugger version $($Highest.VersionText) is still below required minimum $MinimumVersion"
     }
 
+    if ($Highest.Version -gt $MaximumVersion) {
+        throw "Installed debugger version $($Highest.VersionText) exceeds maximum validated version $MaximumVersion - validate compatibility with Analyze-CrashDump.ps1 before deploying"
+    }
+
     Write-Section "Completed"
     Write-Host "Debugger install or update completed successfully"
+    Write-Host "Validated version range $MinimumVersion to $MaximumVersion"
 }
 catch {
     Write-Section "Install failed"
     Write-Host $_.Exception.Message
     exit 1
+}

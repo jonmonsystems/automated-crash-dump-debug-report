@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ===== SETTINGS =====
-$ReportRoot  = "C:\OnSystems"
+$ReportRoot  = "C:\OnSystems\debugreport"
 $SymbolCache = "C:\OnSystems\syncrodeploy\Symbols"
 
 # ===== FUNCTIONS =====
